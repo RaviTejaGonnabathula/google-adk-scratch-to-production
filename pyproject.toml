@@ -1,0 +1,20 @@
+[project]
+name = "google-adk-scratch-to-production"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Ravi Teja Gonnabathula", email = "raviteja.gonnabathulla@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "adk>=0.0.5",
+    "google>=3.0.0",
+]
+
+[project.scripts]
+google-adk-scratch-to-production = "google_adk_scratch_to_production:main"
+
+[build-system]
+requires = ["uv_build>=0.13.3,<0.14.0"]
+build-backend = "uv_build"
