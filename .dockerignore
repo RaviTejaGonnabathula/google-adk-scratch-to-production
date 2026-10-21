@@ -1,0 +1,12 @@
+.git/
+.venv/
+.env
+.adk/
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+deploy/
+README.md

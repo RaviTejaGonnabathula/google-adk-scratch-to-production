@@ -8,13 +8,9 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "adk>=0.0.5",
-    "google>=3.0.0",
+    "google-adk",
 ]
 
-[project.scripts]
-google-adk-scratch-to-production = "google_adk_scratch_to_production:main"
 
-[build-system]
-requires = ["uv_build>=0.13.3,<0.14.0"]
-build-backend = "uv_build"
+[tool.uv]
+package = false
