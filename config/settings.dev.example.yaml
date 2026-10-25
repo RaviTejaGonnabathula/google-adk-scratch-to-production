@@ -1,0 +1,26 @@
+# Shared model settings are used locally and by both deployment scripts.
+# Replace placeholders locally. Never store passwords, tokens, or private keys here.
+application:
+  model_name: "gemini-3.5-flash-lite"
+  model_location: "us"
+
+google_cloud:
+  project_id: "your-project-id"
+
+deployment:
+  # null uses existing ADC; alternatively use an absolute path to a local key.
+  credentials_file: null
+  cloudrun:
+    region: "us-central1"
+    service_name: "your-service-name"
+    artifact_repository: "cloud-run-source-deploy"
+    allow_unauthenticated: false
+
+  agentruntime:
+    # Runtime hosting and Gemini request locations are independent.
+    region: "us-central1"
+    display_name: "your-agent-dev"
+    # Service-account email, NOT a path to a JSON private key.
+    service_account: "your-runtime-account@your-project-id.iam.gserviceaccount.com"
+    # null creates a new resource; set its numeric ID as a quoted string to update.
+    agent_engine_id: null

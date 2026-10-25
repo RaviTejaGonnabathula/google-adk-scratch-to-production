@@ -1,0 +1,14 @@
+# Cloud Build source uploads: honor Git exclusions, including local credentials.
+.gcloudignore
+.git
+.gitignore
+#!include:.gitignore
+
+# Explicitly exclude local deployment settings from source uploads.
+/config/settings.dev.yaml
+
+# Defense in depth for credential files
+sa-key.json
+*-????????????.json
+*service-account*.json
+*service_account*.json

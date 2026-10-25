@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "google-adk",
+    "google-cloud-agentplatform>=2.2",
 ]
 
 

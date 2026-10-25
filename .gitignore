@@ -25,6 +25,15 @@ dist/
 .env.*
 !.env.example
 
+# Local deployment identifiers; commit only the example template
+/config/settings.dev.yaml
+
+# Service-account private keys (keep credentials outside the repository)
+sa-key.json
+*-????????????.json
+*service-account*.json
+*service_account*.json
+
 # IDE settings
 .vscode/
 .idea/
