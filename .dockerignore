@@ -10,3 +10,12 @@ __pycache__/
 .ruff_cache/
 deploy/
 README.md
+
+# Keep local deployment settings out of the Docker build context
+/config/settings.dev.yaml
+
+# Local service-account key files, including downloaded key filenames
+sa-key.json
+*-????????????.json
+*service-account*.json
+*service_account*.json

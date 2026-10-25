@@ -5,11 +5,14 @@
 # Defines the Google Cloud project, deployment regions, service name,
 # Artifact Registry repository, and whether public access is allowed.
 
-[CmdletBinding()]
+[CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [string]$ProjectId = $env:GOOGLE_CLOUD_PROJECT,
     [string]$CloudRunRegion = $(if ($env:CLOUD_RUN_REGION) { $env:CLOUD_RUN_REGION } else { "us-central1" }),
-    [string]$VertexLocation = $(if ($env:GOOGLE_CLOUD_LOCATION) { $env:GOOGLE_CLOUD_LOCATION } else { "global" }),
+    [Alias('VertexLocation')]
+    [string]$ModelLocation,
+    [string]$ModelName,
+    [string]$ConfigPath,
     [string]$ServiceName = "google-adk-scratch-to-production-dev",
     [string]$ArtifactRepository = "cloud-run-source-deploy",
     [switch]$AllowUnauthenticated
@@ -34,8 +37,8 @@ $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $dockerfilePath = Join-Path $repositoryRoot "Dockerfile"
 
 # PowerShell does not automatically load a repository .env file. Read the
-# deployment settings here so this script uses the same project and Vertex AI
-# location as local ADK development. Explicit parameters and existing
+# project setting here so this script uses the same project as local ADK
+# development. Model settings are resolved separately below. Explicit parameters and existing
 # environment variables still take priority over values from .env.
 $dotenvPath = Join-Path $repositoryRoot ".env"
 $dotenvValues = @{}
@@ -62,10 +65,19 @@ if (-not $PSBoundParameters.ContainsKey("ProjectId") -and
     $ProjectId = $dotenvValues["GOOGLE_CLOUD_PROJECT"]
 }
 
-if (-not $PSBoundParameters.ContainsKey("VertexLocation") -and
-    $dotenvValues.ContainsKey("GOOGLE_CLOUD_LOCATION")) {
-    $VertexLocation = $dotenvValues["GOOGLE_CLOUD_LOCATION"]
-}
+# Resolve only shared model settings from YAML. Other Cloud Run options retain
+# their existing parameter/.env behavior; YAML credentials are not used here.
+if (-not $ConfigPath) { $ConfigPath = Join-Path $repositoryRoot 'config/settings.dev.yaml' }
+$pythonCommand = Join-Path $repositoryRoot '.venv/Scripts/python.exe'
+$configHelper = Join-Path $repositoryRoot 'deploy/agentruntime/config.py'
+$modelArgs = @($configHelper, '--model-config', $ConfigPath)
+if ($PSBoundParameters.ContainsKey('ModelName')) { $modelArgs += @('--model-name', $ModelName) }
+if ($PSBoundParameters.ContainsKey('ModelLocation')) { $modelArgs += @('--model-location', $ModelLocation) }
+$modelJson = & $pythonCommand @modelArgs
+if ($LASTEXITCODE -ne 0) { throw 'Unable to resolve shared model settings.' }
+$modelSettings = $modelJson | ConvertFrom-Json
+$ModelName = $modelSettings.model_name
+$ModelLocation = $modelSettings.model_location
 
 
 # =============================================================================
@@ -108,9 +120,13 @@ $image = "$CloudRunRegion-docker.pkg.dev/$ProjectId/$ArtifactRepository/$Service
 
 Write-Host "Project:          $ProjectId"
 Write-Host "Cloud Run region: $CloudRunRegion"
-Write-Host "Vertex location:  $VertexLocation"
+Write-Host "Model location:   $ModelLocation"
+Write-Host "Model name:       $ModelName"
 Write-Host "Service:          $ServiceName"
 Write-Host "Image:            $image"
+
+# Stop before all cloud operations when previewing.
+if (-not $PSCmdlet.ShouldProcess("$ProjectId/$CloudRunRegion/$ServiceName", 'Build and deploy Cloud Run')) { return }
 
 
 # =============================================================================
@@ -219,7 +235,7 @@ Write-Host "Deploying to Cloud Run..."
     --memory 1Gi `
     --cpu 1 `
     --timeout 300 `
-    --set-env-vars "GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_PROJECT=$ProjectId,GOOGLE_CLOUD_LOCATION=$VertexLocation" `
+    --set-env-vars "GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_PROJECT=$ProjectId,GOOGLE_CLOUD_LOCATION=$ModelLocation,ADK_MODEL_NAME=$ModelName,ADK_MODEL_LOCATION=$ModelLocation" `
     $authFlag
 
 if ($LASTEXITCODE -ne 0) { throw "Cloud Run deployment failed." }
