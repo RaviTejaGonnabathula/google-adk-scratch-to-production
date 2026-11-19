@@ -14,7 +14,10 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen
 
 # Copy the ADK application after dependencies.
-COPY app ./app
+COPY agent.py ./
+COPY agents ./agents
+COPY tools ./tools
+COPY composition ./composition
 
 EXPOSE 8080
 
@@ -24,4 +27,4 @@ EXPOSE 8080
 # ADK checks Origin even for JavaScript module GET requests. Cloud Run's proxy
 # changes the upstream host, so explicitly trust the local browser origins.
 # This does not disable Cloud Run IAM authentication or make the service public.
-CMD ["uv", "run", "adk", "api_server", "app/src", "--with_ui", "--host", "0.0.0.0", "--port", "8080", "--no-reload", "--allow_origins", "http://127.0.0.1:8081", "--allow_origins", "http://localhost:8081", "--allow_origins", "http://127.0.0.1:8080", "--allow_origins", "http://localhost:8080"]
+CMD ["uv", "run", "--locked", "adk", "api_server", "agents", "--with_ui", "--host", "0.0.0.0", "--port", "8080", "--no-reload", "--allow_origins", "http://127.0.0.1:8081", "--allow_origins", "http://localhost:8081", "--allow_origins", "http://127.0.0.1:8080", "--allow_origins", "http://localhost:8080"]

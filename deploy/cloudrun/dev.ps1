@@ -108,6 +108,11 @@ if ((Get-Item -LiteralPath $dockerfilePath).Length -eq 0) {
     throw "Dockerfile is empty. Configure the Dockerfile before deploying."
 }
 
+# The same guarded application roots are used by both deployment targets.
+$packageHelper = Join-Path $repositoryRoot 'deploy/agentruntime/package_sources.py'
+& $pythonCommand $packageHelper --repository $repositoryRoot
+if ($LASTEXITCODE -ne 0) { throw 'Application packaging validation failed.' }
+
 
 # =============================================================================
 # 4. GENERATE DOCKER IMAGE NAME

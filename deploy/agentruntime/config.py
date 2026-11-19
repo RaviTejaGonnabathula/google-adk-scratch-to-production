@@ -9,7 +9,7 @@ from pathlib import Path
 import yaml
 
 # Import only the shared loader, without importing/instantiating the agent.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "app/src/agents"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "agents"))
 from model_settings import resolve_model_settings
 
 

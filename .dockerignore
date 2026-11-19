@@ -1,21 +1,26 @@
-.git/
-.venv/
-.env
-.adk/
-__pycache__/
-*.py[cod]
-*.pyo
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-deploy/
-README.md
+# Only application/build inputs enter the Docker context.
+**
+!Dockerfile
+!pyproject.toml
+!uv.lock
+!agent.py
+!agents/
+!agents/**
+!tools/
+!tools/**
+!composition/
+!composition/**
 
-# Keep local deployment settings out of the Docker build context
-/config/settings.dev.yaml
-
-# Local service-account key files, including downloaded key filenames
-sa-key.json
-*-????????????.json
-*service-account*.json
-*service_account*.json
+# Defense in depth; both deployment scripts also validate all upload roots.
+**/__pycache__/
+**/.adk/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/*.py[cod]
+**/.env
+**/.env.*
+**/*.json
+**/*.pem
+**/*.key
+**/settings.dev.yaml

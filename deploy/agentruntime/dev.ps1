@@ -56,13 +56,13 @@ if ($CredentialsFile) {
     }
     $CredentialsFile = (Resolve-Path -LiteralPath $CredentialsFile).Path
 }
-# Deploy the package that exports root_agent directly. The outer src/agent.py
-# uses a top-level import that depends on the launch directory.
-$agentPath = Join-Path $repositoryRoot 'app\src\agents'
-if ($CredentialsFile -and $CredentialsFile.StartsWith(
-    $agentPath.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
-    throw 'Credentials must be outside the uploaded agent package.'
-}
+# Validate all three upload roots, including files copied as extra packages.
+$agentPath = Join-Path $repositoryRoot 'agents'
+$packageHelper = Join-Path $PSScriptRoot 'package_sources.py'
+$packageArgs = @('--repository', $repositoryRoot)
+if ($CredentialsFile) { $packageArgs += @('--credentials-file', $CredentialsFile) }
+& $pythonCommand $packageHelper @packageArgs
+if ($LASTEXITCODE -ne 0) { throw 'Application packaging validation failed.' }
 
 # Read only the project setting; do not upload the repository's .env or secrets.
 # Explicit parameters and an existing process environment take precedence.
@@ -84,12 +84,12 @@ if (-not (Test-Path -LiteralPath $adkCommand)) {
     throw 'Project ADK executable missing. Run uv sync from the repository root.'
 }
 if (-not (Test-Path -LiteralPath (Join-Path $agentPath 'agent.py'))) {
-    throw 'The app/src/agents/agent.py entry point is missing.'
+    throw 'The agents/agent.py entry point is missing.'
 }
 # The deployment CLI reads an agent-local .env automatically. Refuse that case
 # rather than accidentally publishing credentials with the source package.
 if (Test-Path -LiteralPath (Join-Path $agentPath '.env')) {
-    throw 'Remove the agent-local .env from app/src/agents before deployment; keep local settings in the repository root.'
+    throw 'Remove the agent-local .env from agents before deployment; keep local settings in the repository root.'
 }
 
 $deployArgs = @('deploy', 'agent_engine', '--project', $ProjectId,
@@ -100,7 +100,7 @@ if ($ServiceAccount) { $deployArgs += @('--service_account', $ServiceAccount) }
 # ADK can clear --temp_folder before generating files. Always provide a fresh,
 # unique path outside the source tree; never point it at an existing workspace.
 $buildPath = Join-Path ([IO.Path]::GetTempPath()) ('adk-runtime-' + [guid]::NewGuid().ToString('N'))
-$deployArgs += @('--temp_folder', $buildPath, $agentPath)
+$deployArgs += @('--temp_folder', $buildPath)
 $operation = if ($AgentEngineId) { 'Update Agent Runtime resource' } else { 'Create NEW Agent Runtime resource' }
 Write-Host "Action: $operation"
 Write-Host "Runtime region: $Region"
@@ -112,6 +112,7 @@ if ($CheckPermissions -or $PSCmdlet.ShouldProcess("$ProjectId/$Region ($DisplayN
     $previousAdc = $env:GOOGLE_APPLICATION_CREDENTIALS
     $previousGcloud = $env:CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
     $runtimeConfigPath = $null
+    $sourceRoot = $null
     Push-Location $repositoryRoot
     try {
         if ($CredentialsFile) {
@@ -123,6 +124,11 @@ if ($CheckPermissions -or $PSCmdlet.ShouldProcess("$ProjectId/$Region ($DisplayN
         & $pythonCommand @checkArgs
         if ($LASTEXITCODE -ne 0) { throw 'Permission preflight failed; deployment blocked.' }
         if ($CheckPermissions) { return }
+        $sourceJson = & $pythonCommand $packageHelper @packageArgs --prepare
+        if ($LASTEXITCODE -ne 0) { throw 'Application source staging failed.' }
+        $sources = $sourceJson | ConvertFrom-Json
+        $sourceRoot = $sources.root
+        $deployArgs += @('--extra_packages', $sources.tools, '--extra_packages', $sources.composition, $sources.agents)
         # Pass a non-secret model-only variable via ADK's supported runtime config.
         $runtimeConfigPath = & $pythonCommand $configHelper --write-runtime-config $ModelLocation --model-name $ModelName
         if ($LASTEXITCODE -ne 0) { throw 'Failed to generate model runtime configuration.' }
@@ -134,11 +140,21 @@ if ($CheckPermissions -or $PSCmdlet.ShouldProcess("$ProjectId/$Region ($DisplayN
         Write-Host 'Deployment completed. Save the resource ID printed by ADK for subsequent updates.'
     }
     finally {
-        if ($runtimeConfigPath -and (Test-Path -LiteralPath $runtimeConfigPath)) {
-            Remove-Item -LiteralPath $runtimeConfigPath -Force
-        }
+        # Restore caller state even if removing a temporary file fails.
         $env:GOOGLE_APPLICATION_CREDENTIALS = $previousAdc
         $env:CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE = $previousGcloud
         Pop-Location
+        if ($sourceRoot -and (Test-Path -LiteralPath $sourceRoot)) {
+            $resolvedSourceRoot = (Resolve-Path -LiteralPath $sourceRoot).Path
+            $expectedTempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
+            if ([IO.Path]::GetDirectoryName($resolvedSourceRoot) -ne $expectedTempRoot -or
+                [IO.Path]::GetFileName($resolvedSourceRoot) -notmatch '^adk-sources-[a-zA-Z0-9_-]+-packages$') {
+                throw 'Refusing to remove unexpected staging directory.'
+            }
+            Remove-Item -LiteralPath $resolvedSourceRoot -Recurse -Force
+        }
+        if ($runtimeConfigPath -and (Test-Path -LiteralPath $runtimeConfigPath)) {
+            Remove-Item -LiteralPath $runtimeConfigPath -Force
+        }
     }
 }

@@ -16,6 +16,8 @@ Run commands from the repository root in **Windows PowerShell**, unless instruct
 - YAML-driven Agent Runtime deployment, previews, and IAM checks.
 - Separate hosting and model locations.
 - Offline configuration tests and credential upload safeguards.
+- Versioned capability selection with lazy imports and fresh agent factories.
+- Synthetic FAQ function-tool, delegated scheduling, and RAG AgentTool examples.
 
 ## Tech Stack
 
@@ -43,18 +45,35 @@ Authenticated platform client ---> Agent Runtime ----> Vertex AI Gemini
 
 Deployment credentials authorize resource creation. The deployed runtime identity authorizes the agent's model and tool access. Cloud Run's proxy does not target Agent Runtime.
 
+The application now uses repository-root `agents/`, `tools/`, and `composition/` packages, following the [Phase 2 Notion plan](https://app.notion.com/p/41bf308b91b7813db47de1ba01fa0757). The public aliases remain `agent.root_agent` → `agents.root_agent` → `agents.agent.root_agent` → `agents.master.master_agent`. A small `app/src/agent.py` launcher preserves the earlier local commands; it contains no second implementation.
+
+`composition` validates the entire selection before resolving any capability factory. `master/factory.py` constructs fresh masters; specialist factories construct fresh agents and injected adapters. `master/agent.py` builds the one compatibility export for normal ADK loading. Package exports are lazy so importing factories or model settings does not construct that singleton. No module import or construction makes a model request or discovers credentials.
+
+`tools` owns deterministic operations, validation, authorization checks, and adapter contracts. ADK agent instructions stay with their definitions. This phase adds no second framework, separate API server, external session store, generic domain layer, or infrastructure templates.
+
 ## Project Structure
 
 ```text
-app/src/
-  agent.py                         # Local entry point
-  agents/
-    __init__.py
-    agent.py                       # Exports root_agent
-    model_settings.py              # Shared model configuration loader
-    master/
-      __init__.py
-      agent.py                     # Agent and Gemini client configuration
+agent.py                           # Repository-root ADK entry point
+agents/
+  __init__.py / agent.py            # Lazy public export / root_agent alias
+  model_settings.py / models.py    # Existing precedence / fresh model wrapper
+  capabilities.yaml                # Packaged non-secret selection; empty by default
+  requirements.txt                 # Generated from uv.lock for Agent Runtime
+  master/
+    __init__.py / agent.py          # Compatibility master_agent export
+    factory.py                     # Fresh master construction
+  sub_agents/
+    scheduler/                     # Delegated specialist factory
+    rag/                           # AgentTool specialist factory
+tools/
+  contracts.py                     # Typed adapter, identity, and result contracts
+  faq/ / scheduler/ / rag/          # Deterministic tools and synthetic adapters
+composition/
+  specs.py / config.py             # Strict schema and manifest loading
+  registry.py / builder.py         # Lazy factories and fresh ADK graph
+app/src/agent.py                    # Compatibility launcher for original commands
+tests/                             # Offline schema, behavior, isolation, packaging checks
 config/
   settings.dev.example.yaml        # Safe deployment template
 deploy/
@@ -62,6 +81,7 @@ deploy/
   agentruntime/
     dev.ps1                        # YAML-driven deployment wrapper
     config.py                      # YAML, runtime config, and IAM checks
+    package_sources.py             # Guarded upload roots and source staging
     test_config.py                 # Offline tests
 sa-key.example.json                # Fake key-format example
 Dockerfile                         # Cloud Run build and startup
@@ -72,6 +92,61 @@ README.md                          # Single project guide
 ```
 
 Local `.env`, `config/settings.dev.yaml`, real keys, environments, and caches are omitted. The fake key example currently lives at the repository root.
+
+Only implemented packages exist. Database, human escalation, API integration, the FAQ specialist, templates, and the generator skill remain future work. Keep documentation in this root README.
+
+### Capability selection
+
+Edit `agents/capabilities.yaml`, then restart locally or rebuild/redeploy the application. It is packaged with the agent in both deployment targets, independently of private deployment YAML. It must never contain credentials, connection strings, module paths, or caller identities.
+
+The default remains master-only:
+
+```yaml
+schema_version: 1
+capabilities: []
+```
+
+This mixed selection enables every Phase 2 example:
+
+```yaml
+schema_version: 1
+capabilities:
+  - name: faq
+    integration: direct_tool
+  - name: scheduler
+    integration: sub_agent
+  - name: rag
+    integration: agent_tool
+```
+
+| Capability / supported mode | Behavior | Model-visible argument |
+| --- | --- | --- |
+| `faq` / `direct_tool` | Master calls `lookup_faq`; no FAQ specialist is constructed | `question` |
+| `scheduler` / `sub_agent` | Control transfers to `scheduler_agent`, which calls `check_slots` | `day` in `YYYY-MM-DD` format |
+| `rag` / `agent_tool` | Master calls `rag_agent`; it retrieves synthetic documents and returns its answer to the master | AgentTool `request`; retriever `query` |
+
+For an individual example, keep only its entry. Each entry optionally accepts `enabled: false` (strict boolean; default `true`) and `adapter: mock` (default). Disabled entries are structurally validated but do not import their implementation or resolve adapters. Unknown names/fields, duplicate names including disabled entries, invalid modes, enabled but unsupported pairs, and non-mock enabled adapters fail before capability construction. The remaining three capability names are recognized only for disabled/future selections.
+
+The file requires exactly `schema_version: 1` and a `capabilities` list. Duplicate YAML keys, empty files, malformed YAML, and unsupported schema versions fail with `ConfigurationError`; they do not silently disable capabilities. An absent default file preserves master-only behavior. An explicitly requested missing file fails.
+
+For embedding or tests, `build_application(master_factory=..., specification=...)` accepts a `CompositionSpec` or the same mapping. `specification=[]` explicitly selects master-only and takes precedence over any manifest path. `manifest_path=...` loads a required file; `default_manifest_path=...` permits an absent file. The ADK entry point resolves the default path relative to the agent package, never the working directory. There is no capability environment override and capability selection is not read from `config/settings.dev.yaml`.
+
+### Adapters and authorization
+
+Factories accept injected `model`, `adapter`, and `authorization` dependencies. `build_application` also accepts `model_factory(agent_name)` and an optional `adapter_factories` mapping keyed by capability. Supplying that mapping requires a callable for every enabled capability. A factory must return a new compatible adapter for each build. The registry uses fixed module references, not paths supplied by YAML.
+
+Phase 2 adapters are in-memory and use immutable synthetic records, returning fresh result containers so one session cannot mutate a later session's data. Their default authorization provider returns a **synthetic demo identity**, not the identity of an authenticated user. An injected provider must obtain verified identity from the serving/authentication boundary; model arguments and client-controlled session state are not authoritative. Tool wrappers enforce tenant `demo` and the relevant read scope before calling adapters; mocks also enforce these rules. Neither adapters nor authorization parameters are exposed to the model. No real user-data integration is enabled.
+
+| Boundary | Contract / deferred requirement |
+| --- | --- |
+| FAQ | `FAQAdapter.lookup(question, context)` returns an answer and source status |
+| Scheduling | `SchedulingAdapter.check_slots(day, context)` returns UTC synthetic availability; no booking |
+| Retrieval | `RetrievalAdapter.retrieve(query, context)` returns synthetic documents with IDs; no embeddings/vector store |
+| Database (deferred) | Read-only scoped adapter, parameterized queries, verified tenant/record authorization |
+| Human escalation (deferred) | Explicit confirmed handoff, permission checks, idempotency key and audit record |
+| API integration (deferred) | Allowlisted endpoints, bounded timeouts, scoped authorization; confirmed/idempotent audited mutations |
+
+Tools return `{status, data, error}`. Expected input, authorization, timeout, and adapter failures become stable error codes without private exception details; unexpected programming errors propagate. Text inputs are bounded and scheduling dates are validated. Future network adapters must enforce their own timeouts and cancellation and produce redacted audit records at the tool boundary. No network client, retry policy, persistent audit sink, or write workflow is implemented in this phase.
 
 ## Prerequisites
 
@@ -175,16 +250,18 @@ To switch models, edit `application.model_name` (and location if needed), remove
 Terminal interaction:
 
 ```powershell
-uv run adk run app/src
+uv run adk run agents
 ```
 
 Development UI:
 
 ```powershell
-uv run adk web app/src --host 127.0.0.1 --port 8000 --no-reload
+uv run adk web agents --host 127.0.0.1 --port 8000 --no-reload
 ```
 
 Open [local ADK UI](http://127.0.0.1:8000/dev-ui/). Stop with Ctrl+C. The local server is for trusted development use; do not expose it publicly. Model requests may incur charges.
+
+The original `uv run adk run app/src` and `uv run adk web app/src --host 127.0.0.1 --port 8000 --no-reload` commands remain available through the compatibility launcher. There is one authoritative agent tree at the repository root.
 
 ## API Documentation
 
@@ -206,16 +283,39 @@ The response is an OpenAPI JSON document with endpoint paths and request/respons
 ## Testing
 
 ```powershell
+uv sync --locked
 uv pip check
-uv run python -m unittest discover -s deploy/agentruntime -p test_config.py
+uv run --locked python -m unittest discover -s deploy/agentruntime -p test_config.py
+uv run --locked python -m unittest discover -s tests -p "test_*.py"
 .\deploy\agentruntime\dev.ps1 -WhatIf
 .\deploy\cloudrun\dev.ps1 -WhatIf
 .\deploy\agentruntime\dev.ps1 -CheckPermissions
 ```
 
-The offline suite covers configuration, location separation, and mocked permission outcomes. `-WhatIf` previews locally without cloud calls. `-CheckPermissions` performs read-only live checks using deployment credentials.
+The original suite covers configuration, location separation, and mocked permission outcomes. The architecture suite covers strict configuration, factory validation, fresh instances, function schemas, authorization failures, fake-model execution of all three patterns, import sentinels, and deployment artifacts. Fake models exercise the ADK Runner; network connections and ADC lookup are blocked. Isolated subprocesses import staged packages without the checkout or private YAML. Tests do not need cloud credentials.
 
-Core checks cover project access, service usage, agent create/update, and runtime-account `actAs`. They do not validate all APIs, billing, build permissions, quota, model availability, startup, or an actual agent response. Automated integration and end-to-end tests are not configured.
+`-WhatIf` validates upload roots and previews locally without cloud calls; it stops before SDK staging. `-CheckPermissions` performs read-only live checks using deployment credentials and is separate from the offline suite.
+
+Core permission checks cover project access, service usage, agent create/update, and runtime-account `actAs`. They do not validate all APIs, billing, build permissions, quota, model availability, startup, or an actual agent response. Cloud end-to-end tests are not configured.
+
+### Phase 2 verification record — November 18, 2026
+
+Implementation branch: `feature/phase2-modular-architecture`, based on refreshed `origin/main` at `63da6f28feaffbb3ef9d025e7c05c4ae56ce6cb4`. That base has the same tree as the reviewed `develop` commit `83b319c8ac55558e8cba4ebda16c58a4392f1af6`. The implementation is local and awaits merge review.
+
+Tested with Python **3.12.7**, Google ADK **2.12.0**, Agent Platform SDK **2.6.0**, and PyYAML **6.0.3**. PyYAML is now an explicit dependency; the existing resolved versions were retained. `uv sync --locked` and `uv pip check` passed.
+
+| Check | Observed result |
+| --- | --- |
+| Existing configuration regression suite | All **10** tests passed after the package move; model-setting precedence remains covered |
+| Phase 2 regression suite | All **25** tests passed, including actual ADK Runner execution with fake models for the three patterns |
+| Compatibility and isolation | Matching master/root aliases, original launcher, ADK loader, API server discovery, fresh factories, schema exclusions, and unselected import sentinels passed |
+| Agent Runtime artifact | Actual installed ADK staging ran with its cloud client mocked; default, individual, and mixed manifests imported correctly outside the checkout; locked requirements and upload safeguards passed |
+| Cloud Run artifact inputs | Dockerfile COPY sources/startup path and isolated imports passed for default, individual, and mixed selections; this is a source-layout check, not a container execution check |
+| Deployment previews | Both PowerShell `-WhatIf` commands passed; no remote submission occurred |
+| Local Docker build/run | **Not performed:** Docker Desktop's Linux engine was unavailable |
+| Remote validation | **Not performed:** no cloud deployment, live IAM check, remote build/startup, authenticated service request, or real model response was tested in this implementation run |
+
+The architecture is ready for merge review. Full capability examples, additional capability/mode pairs, provider integrations, the generator skill/templates, CI, and production operations remain deferred as described in the plan. These results do not establish production readiness.
 
 ## Deployment
 
@@ -295,7 +395,7 @@ After reviewing YAML and passing the checks in [Testing](#testing):
 .\deploy\agentruntime\dev.ps1
 ```
 
-This runs the permission preflight, generates runtime configuration, and deploys `app/src/agents` with `adk deploy agent_engine`. It does not enable APIs or grant roles.
+This validates upload roots, runs the permission preflight, stages sanitized copies, generates runtime configuration, and deploys `agents/` with `adk deploy agent_engine`. `tools/` and `composition/` are explicit `--extra_packages`. The primary upload is never the repository root. Source and model-config staging folders are cleaned afterward. This does not enable APIs or grant roles.
 
 A null/empty effective `agent_engine_id` creates a **new resource**; the display name does not identify an update. Save the numeric ID printed after success:
 
@@ -305,7 +405,15 @@ agent_engine_id: "1234567890"
 
 Run the same command to update it, keeping the original project and region. Alternatively pass `-AgentEngineId "1234567890"`.
 
-ADK generates its own build files. This workflow does not use the root Dockerfile or automatically apply root `uv.lock` to remote dependencies. Review packaging when adding libraries. Test the deployed resource through its supported authenticated API or console and confirm a real model response.
+ADK generates its own build files. This workflow does not use the root Dockerfile or automatically consume root `uv.lock`. The tracked `agents/requirements.txt` is an exact dependency export from the lock, and a regression test detects drift. After an intentional dependency change, regenerate it:
+
+```powershell
+uv lock
+uv export --locked --no-dev --no-hashes --no-emit-project --no-annotate --output-file agents/requirements.txt
+uv sync --locked
+```
+
+The SDK may append a compatible Agent Platform minimum-version constraint during staging; the exported exact pins remain. Both wrappers reject `.env` and unexpected data/credential files inside all three upload roots. Staging copies Python sources, the manifest, and exported requirements while omitting caches; symlinks/junctions are rejected. Future capability data files require an explicit packaging-policy change. Docker uses an allowlist of application/build inputs. Tests inspect the actual SDK-generated artifact with the cloud client mocked, plus the root Dockerfile's copy and startup paths. Test any deployed resource separately through its authenticated API and confirm a real model response.
 
 ## CI/CD Pipeline
 
@@ -328,8 +436,8 @@ Troubleshoot build failure, runtime startup, authentication, and model errors se
 - [sa-key.example.json](sa-key.example.json) is fake and cannot authenticate. Never fill it with real secrets.
 - Real YAML is ignored; [the example template](config/settings.dev.example.yaml) stays eligible for Git.
 - Ignore rules do not remove tracked secrets or detect every filename. Revoke/rotate any exposed key.
-- Git, Docker, Cloud Build, and SDK packaging exclusions are distinct. Keep all secrets outside `app/src/agents`.
-- The Agent Runtime wrapper rejects an agent-local `.env` and configured keys inside the uploaded package. Temporary model config contains no credentials.
+- Git, Docker, Cloud Build, and SDK packaging exclusions are distinct. Keep all secrets outside `agents/`, `tools/`, and `composition/`.
+- Both wrappers validate those upload roots. Agent Runtime also rejects configured keys under any of them. Temporary model config and the capability manifest contain no credentials.
 - Durable storage is not configured by the Cloud Run script; instance-local data is temporary. Review persistence and security before production use.
 
 ## Troubleshooting
