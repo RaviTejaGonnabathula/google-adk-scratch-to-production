@@ -7,7 +7,7 @@ import yaml
 
 
 def resolve_model_settings(path=None, *, model_name=None, model_location=None):
-    path = Path(path) if path else Path(__file__).resolve().parents[3] / "config/settings.dev.yaml"
+    path = Path(path) if path else Path(__file__).resolve().parents[1] / "config/settings.dev.yaml"
     application = {}
     if path.is_file():
         try:

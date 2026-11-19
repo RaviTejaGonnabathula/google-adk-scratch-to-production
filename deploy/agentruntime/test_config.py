@@ -19,8 +19,8 @@ class ConfigTests(unittest.TestCase):
 
     def test_model_location_does_not_change_hosting_region(self):
         root = Path(__file__).resolve().parents[2]
-        with patch.dict(os.environ, {"ADK_MODEL_NAME": "test-model", "ADK_MODEL_LOCATION": "us", "GOOGLE_CLOUD_LOCATION": "us-central1"}), patch.object(sys, "path", [str(root / "app/src"), *sys.path]):
-            namespace = runpy.run_path(str(root / "app/src/agents/master/agent.py"), run_name="agents.master._test_agent")
+        with patch.dict(os.environ, {"ADK_MODEL_NAME": "test-model", "ADK_MODEL_LOCATION": "us", "GOOGLE_CLOUD_LOCATION": "us-central1"}), patch.object(sys, "path", [str(root), *sys.path]):
+            namespace = runpy.run_path(str(root / "agents/master/agent.py"), run_name="agents.master._test_agent")
             self.assertEqual(namespace["master_agent"].model.client_kwargs["location"], "us")
             self.assertEqual(namespace["master_agent"].model.model, "test-model")
             self.assertEqual(os.environ["GOOGLE_CLOUD_LOCATION"], "us-central1")
